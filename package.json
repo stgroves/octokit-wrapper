@@ -14,5 +14,8 @@
   "dependencies": {
     "libsodium-wrappers": "^0.7.15",
     "octokit": "^5.0.3"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/"
   }
 }
