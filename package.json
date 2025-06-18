@@ -1,5 +1,5 @@
 {
-  "name": "@stgroves/ocktokit-wrapper",
+  "name": "@stgroves/octokit-wrapper",
   "version": "1.0.0",
   "description": "",
   "main": "octokit-wrapper.js",
@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/stgroves/ocktokit-wrapper.git"
+    "url": "https://github.com/stgroves/octokit-wrapper.git"
   },
   "dependencies": {
     "libsodium-wrappers": "^0.7.15",
