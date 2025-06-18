@@ -4,8 +4,8 @@ import sodium from 'libsodium-wrappers';
 export default class OctokitWrapper {
     static #appOctokit;
     static #userOctokit;
-    static #sodium;
 
+    static #sodiumReady;
     static #accessToken;
 
     static #HEADER = {accept: 'application/json'};
@@ -122,6 +122,20 @@ export default class OctokitWrapper {
         }
     }
 
+    static async getSodium() {
+        if (!OctokitWrapper.#sodiumReady) {
+            console.log('Preparing sodium');
+
+            await sodium.ready;
+
+            console.log('sodium ready');
+
+            OctokitWrapper.#sodiumReady = true;
+        }
+
+        return sodium;
+    }
+
     static async getRepoID(owner, repo) {
         try {
             const octokit = await OctokitWrapper.getOrCreateAppOctokit();
@@ -142,17 +156,6 @@ export default class OctokitWrapper {
      * @returns {Promise<void>}
      */
     static async updateSecrets(owner, repo, secrets) {
-        if (!OctokitWrapper.#sodium) {
-
-            console.log('Preparing sodium');
-
-            await sodium.ready;
-
-            console.log('sodium ready');
-
-            OctokitWrapper.#sodium = sodium;
-        }
-
         const octokit = await OctokitWrapper.getOrCreateAppOctokit();
         const {data: publicKey} = await octokit.rest.actions.getRepoPublicKey({owner, repo});
 
@@ -213,19 +216,21 @@ export default class OctokitWrapper {
         }
     }
 
-    static encrypt(publicKey, token) {
-        const binaryKey = OctokitWrapper.#sodium.from_base64(
-            publicKey,
-            OctokitWrapper.#sodium.base64_variants.ORIGINAL
-        );
-        const binaryToken = OctokitWrapper.#sodium.from_string(token);
+    static async encrypt(publicKey, token) {
+        const sodium = await OctokitWrapper.getSodium();
 
-        const encrypted = OctokitWrapper.#sodium.crypto_box_seal(binaryToken, binaryKey);
+        const binaryKey = sodium.from_base64(
+            publicKey,
+            sodium.base64_variants.ORIGINAL
+        );
+        const binaryToken = sodium.from_string(token);
+
+        const encrypted = sodium.crypto_box_seal(binaryToken, binaryKey);
 
         return Promise.resolve(
-            OctokitWrapper.#sodium.to_base64(
+            sodium.to_base64(
                 encrypted,
-                OctokitWrapper.#sodium.base64_variants.ORIGINAL
+                sodium.base64_variants.ORIGINAL
             )
         );
     }
