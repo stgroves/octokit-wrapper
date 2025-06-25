@@ -1,6 +1,6 @@
 {
   "name": "@stgroves/octokit-wrapper",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "",
   "main": "octokit-wrapper.js",
   "scripts": {

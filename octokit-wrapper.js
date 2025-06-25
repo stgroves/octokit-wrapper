@@ -5,6 +5,13 @@ import { createSodiumProvider } from './sodium-provider.js';
 const HEADER = {accept: 'application/json'};
 const OAUTH_URL = 'POST https://github.com/login/oauth/access_token';
 
+/**
+ * Creates a provider to access Octokit as GitHub App.
+ * @param {string} appID
+ * @param {string} pem
+ * @param {number} installationID
+ * @returns {() => Promise<Result<FullOctokit>>}
+ */
 const createAppOctokitProvider = (appID, pem, installationID) => {
     let cachedOctokit = null;
 
@@ -28,6 +35,11 @@ const createAppOctokitProvider = (appID, pem, installationID) => {
     };
 };
 
+/**
+ * Creates a provider to access Octokit as a user.
+ * @param {string} accessToken - The user's OAuth access token.
+ * @returns {() => Promise<Result<FullOctokit>>}
+ */
 const createUserOctokitProvider = (accessToken) => {
     let cachedOctokit = null;
 
@@ -50,12 +62,19 @@ const createUserOctokitProvider = (accessToken) => {
     }
 }
 
+/**
+ * Generates an access token using the OAuth code.
+ * @param {FullOctokit} octokit - An Octokit instance to perform the request.
+ * @param {string} clientID - OAuth App client ID.
+ * @param {string} clientSecret - OAuth App client secret.
+ * @param {string} code - The temporary code received during the OAuth callback.
+ * @returns {Promise<Result<{ accessToken: string, refreshToken: string }>>}
+ */
 const getAccessTokenFromCode = async (octokit, clientID, clientSecret, code) => {
     try {
         console.log('Creating initial OAuth token.');
 
-        const response = await request(
-            octokit,
+        const response = await createRequest(
             OAUTH_URL,
             {
                 client_id: clientID,
@@ -63,7 +82,7 @@ const getAccessTokenFromCode = async (octokit, clientID, clientSecret, code) => 
                 code,
                 headers: HEADER
             }
-        );
+        ).runWith(octokit);
 
         return {
             success: true,
@@ -80,6 +99,14 @@ const getAccessTokenFromCode = async (octokit, clientID, clientSecret, code) => 
     }
 }
 
+/**
+ * Generates an access token using the refresh token.
+ * @param {FullOctokit} octokit - An Octokit instance to perform the request.
+ * @param {string} clientID - OAuth App client ID.
+ * @param {string} clientSecret - OAuth App client secret.
+ * @param {string} refreshToken - The refresh token associated with the access token.
+ * @returns {Promise<Result<{ accessToken: string, refreshToken: string }>>}
+ */
 const getAccessTokenFromRefreshToken = async (octokit, clientID, clientSecret, refreshToken) => {
     try {
         console.log('Refreshing OAuth token.');
@@ -110,6 +137,13 @@ const getAccessTokenFromRefreshToken = async (octokit, clientID, clientSecret, r
     }
 }
 
+/**
+ * Gets the repo's numerical ID.
+ * @param {FullOctokit} octokit
+ * @param {string} owner
+ * @param {string} repo
+ * @returns {Promise<Result<number>>}
+ */
 const getRepoID = async (octokit, owner, repo) => {
     try {
         const response = await octokit.rest.repos.get({owner, repo});
@@ -126,8 +160,18 @@ const getRepoID = async (octokit, owner, repo) => {
     }
 }
 
+/**
+ * Gets a ready-to-use sodium instance.
+ * @type {() => Promise<typeof import('libsodium-wrappers')>}
+ */
 const getSodium = createSodiumProvider(sodium);
 
+/**
+ * Creates a request data object.
+ * @param {string} restQuery
+ * @param {Object} queryObject
+ * @returns {RequestBuilder<import('@octokit/core').Octokit>}
+ */
 const createRequest = (restQuery, queryObject) => {
     const MAX_RETRIES = 3; // Set retry count
     const INTERVAL = 2000; // 2 seconds
@@ -156,10 +200,12 @@ const createRequest = (restQuery, queryObject) => {
 }
 
 /**
+ * Executes a callback with retry logic and exponential backoff.
+ *
  * @template T
- * @param {() => Promise<T>} callback
- * @param {{ maxRetries: number, interval: number }} retryConfig
- * @returns {Promise<{ success: true, data: T } | { success: false, error: Error }>}
+ * @param {() => Promise<T>} callback - The async operation to retry on failure.
+ * @param {{ maxRetries: number, interval: number }} retryConfig - Retry behavior configuration.
+ * @returns {Promise<Result<T>>} - Result object containing either the successful data or an error.
  */
 const runWithRetries = async (callback, retryConfig) => {
     const { maxRetries, interval } = retryConfig;
@@ -188,10 +234,26 @@ const runWithRetries = async (callback, retryConfig) => {
     }
 }
 
+/**
+ * Attempts a typed Octokit request using a retry wrapper.
+ *
+ * @param {FullOctokit} octokit - An authenticated Octokit instance.
+ * @param {{ restQuery: string, queryObject: object, propertyName?: string|null }} requestData - The request config.
+ * @param {{ maxRetries: number, interval: number }} retryConfig - Retry behavior configuration.
+ * @returns {Promise<Result<any>>} - Result object wrapping the request response or error.
+ */
 const attemptRequest = async (octokit, requestData, retryConfig) => {
     return runWithRetries(() => request(octokit, requestData), retryConfig);
 }
 
+/**
+ * Executes a GitHub REST request via Octokit with optional property extraction.
+ *
+ * @param {FullOctokit} octokit - An authenticated Octokit instance.
+ * @param {{ restQuery: string, queryObject: object, propertyName?: string|null }} requestData - The request configuration.
+ * @returns {Promise<any>} The response data or a specific property from the response.
+ * @throws {Error} If a propertyName is specified but not found in the response.
+ */
 const request = async (octokit, requestData) => {
     const response = await octokit.request(requestData.restQuery, requestData.queryObject);
 
@@ -204,12 +266,13 @@ const request = async (octokit, requestData) => {
 }
 
 /**
+ * Updates GitHub Actions secrets for a specific repository.
  *
- * @param {Object} octokit
- * @param {String} owner
- * @param {String} repo
- * @param {OctokitWrapper~SecretData[]} secrets
- * @returns {Promise<void>}
+ * @param {FullOctokit} octokit - An authenticated Octokit instance with REST plugin.
+ * @param {string} owner - The owner of the repository.
+ * @param {string} repo - The name of the repository.
+ * @param {OctokitWrapper~SecretData[]} secrets - An array of secrets to store.
+ * @returns {Promise<void>} Resolves when all secrets have been updated.
  */
 const updateSecrets = async (octokit, owner, repo, secrets) => {
     const {data: publicKey} = await octokit.rest.actions.getRepoPublicKey({owner, repo});
@@ -229,6 +292,13 @@ const updateSecrets = async (octokit, owner, repo, secrets) => {
     }
 }
 
+/**
+ * Encrypts a token using a given public key via libsodium sealed boxes.
+ *
+ * @param {string} publicKey - The base64-encoded public key from GitHub Actions.
+ * @param {string} token - The plaintext token to encrypt.
+ * @returns {Promise<string>} The encrypted value, base64-encoded.
+ */
 const encrypt = async (publicKey, token) => {
     const sodium = await getSodium();
 
@@ -262,4 +332,37 @@ export const OctokitWrapper = {
  * @typedef {Object} OctokitWrapper~SecretData
  * @property {String} key
  * @property {String} value
+ */
+
+/**
+ * @template T
+ * @typedef {Object} ResultSuccess<T>
+ * @property {true} success
+ * @property {T} data
+ */
+
+/**
+ * @typedef {Object} ResultError
+ * @property {false} success
+ * @property {Error} error
+ */
+
+/**
+ * @template T
+ * @typedef {ResultSuccess<T> | ResultError} Result<T>
+ */
+
+/**
+ * @template T
+ * @typedef {Object} RequestBuilder
+ * @property {(maxRetries: number) => RequestBuilder<T>} withRetries
+ * @property {(interval: number) => RequestBuilder<T>} withInterval
+ * @property {(propertyName: string) => RequestBuilder<T>} withProperty
+ * @property {(octokit: T) => Promise<*>} runWith
+ */
+
+/**
+ * @typedef {import('@octokit/core').Octokit & {
+ *   rest: import('@octokit/plugin-rest-endpoint-methods').RestEndpointMethods
+ * }} FullOctokit
  */
