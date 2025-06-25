@@ -1,240 +1,263 @@
 import {Octokit, App} from 'octokit';
 import sodium from 'libsodium-wrappers';
+import { createSodiumProvider } from './sodium-provider.js';
 
-export default class OctokitWrapper {
-    static #appOctokit;
-    static #userOctokit;
+const HEADER = {accept: 'application/json'};
+const OAUTH_URL = 'POST https://github.com/login/oauth/access_token';
 
-    static #sodiumReady;
-    static #accessToken;
+const createAppOctokitProvider = (appID, pem, installationID) => {
+    let cachedOctokit = null;
 
-    static #HEADER = {accept: 'application/json'};
-    static #OAUTH_URL = 'POST https://github.com/login/oauth/access_token';
-
-    static async getOrCreateAppOctokit(appID = null, pem = null, installationID = null) {
-        if (!OctokitWrapper.#appOctokit) {
-            if (!appID) {
-                console.error('App ID is missing');
-                process.exit(1);
-            }
-
-            if (!installationID) {
-                console.error('Installation ID not found!');
-                process.exit(1);
-            }
-
-            if (!pem) {
-                console.error('PEM not found!');
-                process.exit(1);
-            }
-
-            const app = new App({appId: appID, privateKey: pem});
-            OctokitWrapper.#appOctokit = await app.getInstallationOctokit(installationID);
-        }
-
-        return OctokitWrapper.#appOctokit;
-    }
-
-    static async getOrCreateUserOctokit(accessToken) {
-        if (!OctokitWrapper.#userOctokit && !accessToken) {
-            console.error('No access token provided');
-            process.exit(1);
-        }
-
-        if (!OctokitWrapper.#userOctokit || accessToken !== OctokitWrapper.#accessToken) {
-            OctokitWrapper.#userOctokit = await new Octokit({auth: accessToken});
-            OctokitWrapper.#accessToken = accessToken;
-        }
-
-        return OctokitWrapper.#userOctokit;
-    }
-
-    static async getAccessTokenFromCode(clientID, clientSecret, code) {
-        if (!clientID) {
-            console.error('clientID not found!');
-            process.exit(1);
-        }
-
-        if (!clientSecret) {
-            console.error('clientSecret not found!');
-            process.exit(1);
-        }
-
-        if (!code) {
-            console.error('code not found!');
-            process.exit(1);
-        }
+    return async () => {
+        if (cachedOctokit)
+            return { success: true, data: cachedOctokit };
 
         try {
-            console.log('Creating initial OAuth token.');
-
-            const response = await OctokitWrapper.requestAsApp(
-                OctokitWrapper.#OAUTH_URL,
-                {
-                    client_id: clientID,
-                    client_secret: clientSecret,
-                    code,
-                    headers: OctokitWrapper.#HEADER
-                }
-            );
-
-            return [response.access_token, response.refresh_token];
-        } catch (error) {
-            console.error('Token creation failed:', error.message);
-            process.exit(1);
-        }
-    }
-
-    static async getAccessTokenFromRefreshToken(clientID, clientSecret, refreshToken) {
-        if (!clientID) {
-            console.error('clientID not found!');
-            process.exit(1);
-        }
-
-        if (!clientSecret) {
-            console.error('clientSecret not found!');
-            process.exit(1);
-        }
-
-        if (!refreshToken) {
-            console.error('refreshToken not found!');
-            process.exit(1);
-        }
-
-        try {
-            console.log('Refreshing OAuth token.');
-
-            const response = await OctokitWrapper.requestAsApp(
-                OctokitWrapper.#OAUTH_URL,
-                {
-                    client_id: clientID,
-                    client_secret: clientSecret,
-                    refresh_token: refreshToken,
-                    grant_type: 'refresh_token',
-                    headers: OctokitWrapper.#HEADER
-                }
-            );
-
-            return [response.data.access_token, response.data.refresh_token];
-        } catch (error) {
-            console.error('Token refresh failed:', error.message);
-            process.exit(1);
-        }
-    }
-
-    static async getSodium() {
-        if (!OctokitWrapper.#sodiumReady) {
-            console.log('Preparing sodium');
-
-            await sodium.ready;
-
-            console.log('sodium ready');
-
-            OctokitWrapper.#sodiumReady = true;
-        }
-
-        return sodium;
-    }
-
-    static async getRepoID(owner, repo) {
-        try {
-            const octokit = await OctokitWrapper.getOrCreateAppOctokit();
-            const response = await octokit.rest.repos.get({owner, repo});
-
-            return response.data.id;
+            const app = new App({ appId: appID, privateKey: pem });
+            cachedOctokit = await app.getInstallationOctokit(installationID);
+            return { success: true, data: cachedOctokit };
         } catch (e) {
-            console.error('Error fetching repo:', e);
-            process.exit(1);
+            console.error(`Failed to create Octokit:`, {
+                message: e.message,
+                response: e.response?.data,
+                stack: e.stack
+            });
+
+            return { success: false, error: new Error('Failed to create Octokit.') };
+        }
+    };
+};
+
+const createUserOctokitProvider = (accessToken) => {
+    let cachedOctokit = null;
+
+    return async () => {
+        if (cachedOctokit)
+            return { success: true, data: cachedOctokit };
+
+        try {
+            cachedOctokit = await new Octokit({auth: accessToken});
+            return { success: true, data: cachedOctokit };
+        } catch (e) {
+            console.error(`Failed to create Octokit:`, {
+                message: e.message,
+                response: e.response?.data,
+                stack: e.stack
+            });
+
+            return { success: false, error: new Error('Failed to create Octokit.') };
         }
     }
+}
 
-    /**
-     *
-     * @param {String} owner
-     * @param {String} repo
-     * @param {OctokitWrapper~SecretData[]} secrets
-     * @returns {Promise<void>}
-     */
-    static async updateSecrets(owner, repo, secrets) {
-        const octokit = await OctokitWrapper.getOrCreateAppOctokit();
-        const {data: publicKey} = await octokit.rest.actions.getRepoPublicKey({owner, repo});
+const getAccessTokenFromCode = async (octokit, clientID, clientSecret, code) => {
+    try {
+        console.log('Creating initial OAuth token.');
 
-        console.log(`Attempting to store secrets for ${repo}.`);
-
-
-        for (const secret of secrets) {
-            await octokit.rest.actions.createOrUpdateRepoSecret(
-                {
-                    owner,
-                    repo,
-                    secret_name: secret.key,
-                    encrypted_value: await OctokitWrapper.encrypt(publicKey.key, secret.value),
-                    key_id: publicKey.key_id
-                }
-            );
-        }
-    }
-
-    static async requestAsApp(restQuery, queryObject, propertyName = null) {
-        const octokit = await OctokitWrapper.getOrCreateAppOctokit();
-        return await OctokitWrapper.#request(octokit, restQuery, queryObject, propertyName);
-    }
-
-    static async requestAsUser(restQuery, queryObject, propertyName = null) {
-        const octokit = await OctokitWrapper.getOrCreateUserOctokit();
-        return await OctokitWrapper.#request(octokit, restQuery, queryObject, propertyName);
-    }
-
-    static async #request(octokit, restQuery, queryObject, propertyName) {
-        const MAX_RETRIES = 3; // Set retry count
-        const RETRY_DELAY_MS = 2000; // 2 seconds
-
-        let attempt = 1;
-
-        while (attempt <= MAX_RETRIES) {
-            try {
-                const response = await octokit.request(restQuery, queryObject);
-
-                if (!propertyName)
-                    return response.data;
-
-                return response.data[propertyName];
-            } catch (error) {
-                console.error(`Attempt ${attempt} failed:`, error.response ? error.response.data : error.message);
-
-                if (attempt >= MAX_RETRIES) {
-                    console.error(`Failed after ${MAX_RETRIES} attempts. Exiting.`);
-                    process.exit(1);
-                }
-
-                const expRetry = Math.pow(RETRY_DELAY_MS, attempt); //2, 4, 8
-
-                console.log(`Retrying in ${expRetry / 1000} seconds...`);
-                await new Promise((res) => setTimeout(res, expRetry));
-                attempt++;
+        const response = await request(
+            octokit,
+            OAUTH_URL,
+            {
+                client_id: clientID,
+                client_secret: clientSecret,
+                code,
+                headers: HEADER
             }
-        }
+        );
+
+        return {
+            success: true,
+            data: { accessToken: response.data.access_token, refreshToken: response.data.refresh_token }
+        };
+    } catch (e) {
+        console.error(`Failed to create token:`, {
+            message: e.message,
+            response: e.response?.data,
+            stack: e.stack
+        });
+
+        return { success: false, error: new Error('Failed to create token.') };
+    }
+}
+
+const getAccessTokenFromRefreshToken = async (octokit, clientID, clientSecret, refreshToken) => {
+    try {
+        console.log('Refreshing OAuth token.');
+
+        const response = await createRequest(
+            OAUTH_URL,
+            {
+                client_id: clientID,
+                client_secret: clientSecret,
+                refresh_token: refreshToken,
+                grant_type: 'refresh_token',
+                headers: HEADER
+            }
+        ).runWith(octokit);
+
+        return {
+            success: true,
+            data: { accessToken: response.data.access_token, refreshToken: response.data.refresh_token }
+        };
+    } catch (e) {
+        console.error(`Failed to refresh token:`, {
+            message: e.message,
+            response: e.response?.data,
+            stack: e.stack
+        });
+
+        return { success: false, error: new Error('Failed to refresh token.') };
+    }
+}
+
+const getRepoID = async (octokit, owner, repo) => {
+    try {
+        const response = await octokit.rest.repos.get({owner, repo});
+
+        return { success: true, data: response.data.id };
+    } catch (e) {
+        console.error(`Failed to get Repo ID:`, {
+            message: e.message,
+            response: e.response?.data,
+            stack: e.stack
+        });
+
+        return { success: false, error: new Error('Failed to get Repo ID.') };
+    }
+}
+
+const getSodium = createSodiumProvider(sodium);
+
+const createRequest = (restQuery, queryObject) => {
+    const MAX_RETRIES = 3; // Set retry count
+    const INTERVAL = 2000; // 2 seconds
+
+    const retryConfig = {
+        maxRetries: MAX_RETRIES,
+        interval: INTERVAL
     }
 
-    static async encrypt(publicKey, token) {
-        const sodium = await OctokitWrapper.getSodium();
+    const initialState = {
+        restQuery,
+        queryObject,
+        propertyName: null
+    };
 
-        const binaryKey = sodium.from_base64(
-            publicKey,
-            sodium.base64_variants.ORIGINAL
-        );
-        const binaryToken = sodium.from_string(token);
+    const buildRequest = (state, retryConfig) => {
+        return {
+            withRetries: maxRetries => buildRequest(state, { ...retryConfig, maxRetries }),
+            withInterval: interval => buildRequest(state, { ...retryConfig, interval }),
+            withProperty: propertyName => buildRequest({ ...state, propertyName }, retryConfig),
+            runWith: octokit => attemptRequest(octokit, state, retryConfig)
+        };
+    }
 
-        const encrypted = sodium.crypto_box_seal(binaryToken, binaryKey);
+    return buildRequest(initialState, retryConfig);
+}
 
-        return Promise.resolve(
-            sodium.to_base64(
-                encrypted,
-                sodium.base64_variants.ORIGINAL
-            )
+/**
+ * @template T
+ * @param {() => Promise<T>} callback
+ * @param {{ maxRetries: number, interval: number }} retryConfig
+ * @returns {Promise<{ success: true, data: T } | { success: false, error: Error }>}
+ */
+const runWithRetries = async (callback, retryConfig) => {
+    const { maxRetries, interval } = retryConfig;
+
+    let attempt = 1;
+
+    while (attempt <= maxRetries) {
+        try {
+            return { success: true, data: await callback() };
+        } catch (e) {
+            console.error(`Attempt ${attempt} failed:`, {
+                message: e.message,
+                response: e.response?.data,
+                stack: e.stack
+            });
+
+            if (attempt >= maxRetries)
+                return { success: false, error: new Error(`Request failed after ${maxRetries} attempts`) };
+
+            const delay = interval * 2 ** (attempt - 1);
+
+            console.log(`Retrying in ${delay / 1000} seconds...`);
+            await new Promise((res) => setTimeout(res, delay));
+            attempt++;
+        }
+    }
+}
+
+const attemptRequest = async (octokit, requestData, retryConfig) => {
+    return runWithRetries(() => request(octokit, requestData), retryConfig);
+}
+
+const request = async (octokit, requestData) => {
+    const response = await octokit.request(requestData.restQuery, requestData.queryObject);
+
+    const data = requestData.propertyName ? response.data?.[requestData.propertyName] : response.data;
+
+    if (requestData.propertyName && data === undefined)
+        throw new Error(`Property "${requestData.propertyName}" not found in response.`);
+
+    return data;
+}
+
+/**
+ *
+ * @param {Object} octokit
+ * @param {String} owner
+ * @param {String} repo
+ * @param {OctokitWrapper~SecretData[]} secrets
+ * @returns {Promise<void>}
+ */
+const updateSecrets = async (octokit, owner, repo, secrets) => {
+    const {data: publicKey} = await octokit.rest.actions.getRepoPublicKey({owner, repo});
+
+    console.log(`Attempting to store secrets for ${repo}.`);
+
+    for (const secret of secrets) {
+        await octokit.rest.actions.createOrUpdateRepoSecret(
+            {
+                owner,
+                repo,
+                secret_name: secret.key,
+                encrypted_value: await encrypt(publicKey.key, secret.value),
+                key_id: publicKey.key_id
+            }
         );
     }
 }
+
+const encrypt = async (publicKey, token) => {
+    const sodium = await getSodium();
+
+    const binaryKey = sodium.from_base64(
+        publicKey,
+        sodium.base64_variants.ORIGINAL
+    );
+    const binaryToken = sodium.from_string(token);
+
+    const encrypted = sodium.crypto_box_seal(binaryToken, binaryKey);
+
+    return sodium.to_base64(
+        encrypted,
+        sodium.base64_variants.ORIGINAL
+    );
+}
+
+export const OctokitWrapper = {
+    updateSecrets,
+    getAccessTokenFromRefreshToken,
+    getAccessTokenFromCode,
+    getRepoID,
+    getSodium,
+    createUserOctokitProvider,
+    createAppOctokitProvider,
+    createRequest,
+    runWithRetries
+}
+
 /**
  * @typedef {Object} OctokitWrapper~SecretData
  * @property {String} key
