@@ -167,7 +167,7 @@ const getRepoID = async (octokit, owner, repo) => {
 
 /**
  * Gets a ready-to-use sodium instance.
- * @type {() => Promise<typeof import('libsodium-wrappers')>}
+ * @type {GetSodium}
  */
 const getSodium = createSodiumProvider(sodium);
 
@@ -323,6 +323,9 @@ const encrypt = async (publicKey, token) => {
     );
 }
 
+/**
+ * @type {OctokitWrapper}
+ */
 export const OctokitWrapper = Object.freeze({
     updateSecrets,
     getAccessTokenFromRefreshToken,
@@ -334,6 +337,23 @@ export const OctokitWrapper = Object.freeze({
     createRequest,
     runWithRetries
 });
+
+/**
+ * @typedef {Object} OctokitWrapper
+ * @property {UpdateSecrets} updateSecrets
+ * @property {GetAccessTokenFromRefreshToken} getAccessTokenFromRefreshToken
+ * @property {GetAccessTokenFromCode} getAccessTokenFromCode
+ * @property {GetRepoID} getRepoID
+ * @property {GetSodium} getSodium
+ * @property {CreateAppOctokitProvider} createAppOctokitProvider
+ * @property {CreateUserOctokitProvider} createUserOctokitProvider
+ * @property {CreateRequest} createRequest
+ * @property {RunWithRetries} runWithRetries
+ */
+
+/**
+ * @typedef {() => Promise<typeof import('libsodium-wrappers')>} GetSodium
+ */
 
 /**
  * @typedef {Object} OctokitWrapper~SecretData
