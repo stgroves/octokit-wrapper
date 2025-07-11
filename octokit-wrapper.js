@@ -274,12 +274,16 @@ const request = async (octokit, requestData) => {
 
 /**
  * Updates GitHub Actions secrets for a specific repository.
- * @callback UpdateSecrets
+ * @typedef UpdateSecrets
  * @param {FullOctokit} octokit - An authenticated Octokit instance with REST plugin.
  * @param {string} owner - The owner of the repository.
  * @param {string} repo - The name of the repository.
  * @param {OctokitWrapper~SecretData[]} secrets - An array of secrets to store.
  * @returns {Promise<void>} Resolves when all secrets have been updated.
+ */
+
+/**
+ * @type {UpdateSecrets}
  */
 const updateSecrets = async (octokit, owner, repo, secrets) => {
     const {data: {key, key_id}} = await octokit.rest.actions.getRepoPublicKey({owner, repo});
