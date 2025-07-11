@@ -285,7 +285,7 @@ const request = async (octokit, requestData) => {
 /**
  * @type {UpdateSecrets}
  */
-const updateSecrets = async (octokit, owner, repo, secrets) => {
+async function updateSecrets (octokit, owner, repo, secrets) {
     const {data: {key, key_id}} = await octokit.rest.actions.getRepoPublicKey({owner, repo});
 
     console.log(`Attempting to store secrets for ${repo}.`);
