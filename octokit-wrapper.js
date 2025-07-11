@@ -274,7 +274,7 @@ const request = async (octokit, requestData) => {
 
 /**
  * Updates GitHub Actions secrets for a specific repository.
- * @typedef UpdateSecrets
+ * @callback UpdateSecrets
  * @param {FullOctokit} octokit - An authenticated Octokit instance with REST plugin.
  * @param {string} owner - The owner of the repository.
  * @param {string} repo - The name of the repository.
