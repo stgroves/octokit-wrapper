@@ -11,6 +11,7 @@
     "url": "https://github.com/stgroves/octokit-wrapper.git"
   },
   "dependencies": {
+    "@stgroves/js-utilities": "^0.1.1",
     "libsodium-wrappers": "^0.7.15",
     "octokit": "^5.0.3"
   },
